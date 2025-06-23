@@ -1,0 +1,56 @@
+<mujoco model="panda scene">
+  <include file="panda.xml"/>
+
+  <statistic center="0.3 0 0.4" extent="1"/> <!-- This is to change view camera position -->
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 2" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- Table -->
+    <body name="table" pos="0.35 0 0.1">
+        <geom name="table_geom" type="box" size="0.25 0.25 0.1" pos="0 0 0" rgba="0.8 0.6 0.4 1"/>
+    </body>
+
+    <!-- Object to pick -->
+    <body name="object" pos="0.35 0 0.25">
+        <joint name="object_joint" type="free"/>
+        <geom name="object_geom" type="box" size="0.05 0.05 0.05" rgba="0 1 0 1" mass="1.0"/>
+    </body>
+
+    <!-- Target Placement -->
+    <body name="target" pos="0 -0.35 0.1">
+        <geom name="target_geom" type="box" size="0.1 0.1 0.1" rgba="0 1 0 1"/>
+    </body>
+  </worldbody>
+
+  <keyframe>
+      <key name="home" qpos="0 0 0 -1.57079 0 1.57079 -0.7853 0.04 0.04 0.35 0 0.25 1 0 0 0" ctrl="0 0 0 -1.57079 0 1.57079 -0.7853 255"/>
+  </keyframe>
+
+</mujoco>
+
+<!--
+Default Home Pos:
+Joint Angles: [-1.1114370e-22  6.5817144e-03 -1.7787052e-06 -1.5771029e+00 -3.3448453e-04  1.5696489e+00 -7.8529996e-01  3.9999999e-02]
+Hand Pose: [ 5.5609894e-01 -3.6809375e-05  6.1776978e-01] | Hand Quat: [-0.00484384  0.707124    0.7070547  -0.00508084]
+Euler: [ x: 179.9808342, y: -0.8041892, z: -89.9945191 ]
+
+Rotate +90 degrees around Z-axis:
+Joint Angles: [ 1.7730661e-21  6.5758266e-03 -1.7106356e-06 -1.5770954e+00 -3.1679324e-04  1.5696620e+00  7.2424978e-01  3.9999999e-02]
+Hand Pose: [ 5.5609894e-01 -3.4876535e-05  6.1777776e-01] | Hand Quat: [-5.5805613e-05  9.9950808e-01  3.0568738e-02 -7.0061227e-03]
+Euler: [ x: 179.981848, y: -0.8026694, z: -3.5036784 ]
+-->
