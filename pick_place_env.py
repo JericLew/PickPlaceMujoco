@@ -120,9 +120,10 @@ class PickPlaceCustomEnv():
     def _get_obs(self):
         ## Robot state information
         robot_joint_angles = self.data.qpos[:8].copy().astype(np.float32) # 8 joint angles
+        robot_actuator_forces = self.data.actuator_force[:8].copy().astype(np.float32) # 8 actuator forces
         hand_pos = self.data.xpos[self.hand_id].copy().astype(np.float32) # 3 hand position
         hand_quat = self.data.xquat[self.hand_id].copy().astype(np.float32) # 4 hand quaternion
-        state = np.concatenate([robot_joint_angles, hand_pos, hand_quat]).astype(np.float32) # (8 + 3 + 4 = 15)
+        state = np.concatenate([robot_joint_angles, robot_actuator_forces, hand_pos, hand_quat]).astype(np.float32) # (8 + 8 + 3 + 4) = 23 state dimensions
 
         ## Object information
         object = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 7].copy().astype(np.float32) # object position and quaternion

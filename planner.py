@@ -1,106 +1,161 @@
 import numpy as np
+import inverse_kinematics as ik
 
 class Planner():
-    def __init__(self, motion_planner):
+    def __init__(self, motion_planner, mjModel):
         self.state_list =["initial",
-                          "move_above_object",
+                          "moving_above_object",
                           "approaching_object",
                           "grasping_object",
                           "lifting_object",
-                          "moving_to_target",
+                          "moving_above_target",
                           "placing_object",
-                          "release_object",
+                          "releasing_object",
                           "success"]
+        
+        # Variables
         self.state = "initial"
+        self.grasped_pos = None
+        
+        # Motion planner and MuJoCo model
         self.motion_planner = motion_planner
-        self.xy_above_threshold = 0.025  # Distance threshold for checking if hand is above object
-        self.z_above_threshold = 0.05  # Height threshold for checking if hand is above object
-        self.grasp_threshold = 0.05  # Distance threshold for grasping
-        self.grasped_pos = None  # Position of the object when grasped
-        self.place_threshold = 0.05  # Distance threshold for placing the object
+        self.mjModel = mjModel
 
-    def _check_above_object(self, hand_pos, object_pos):
-        return np.linalg.norm(hand_pos[:2] - object_pos[:2]) < self.xy_above_threshold and \
-               (hand_pos[2] - object_pos[2]) > self.z_above_threshold
+        # Constants for distance checks
+        self.z_above_theta = 0.05 # Height above the object when moving above it
+        self.xy_above_threshold = 0.0005  # Distance threshold for checking if a is above b in the xy plane
+        self.z_above_threshold = 0.1  # Height threshold for checking if a is above b in the z direction
+        self.near_threshold = 0.001  # Distance threshold for checking if a is near b
+        self.force_threshold = 0.1  # Force threshold for checking if the hand is grasping the object
+
+    def _check_a_above_b(self, a_pos, b_pos):
+        return np.linalg.norm(a_pos[:2] - b_pos[:2]) < self.xy_above_threshold and \
+               (a_pos[2] - b_pos[2]) > self.z_above_threshold
     
-    def _check_graspable(self, hand_pos, target_pos):
-        return np.linalg.norm(hand_pos - target_pos) < self.grasp_threshold
+    def _check_a_near_b(self, a_pos, b_pos):
+        return np.linalg.norm(a_pos - b_pos) < self.near_threshold
+
+    def _check_grasped(self, hand_pos, object_pos, hand_actuator_force):
+        return hand_actuator_force > self.force_threshold and self._check_a_near_b(hand_pos, object_pos)
     
-    def _check_grasped(self, hand_pos, object_pos):
-        # TODO check force sensing
-        return np.linalg.norm(hand_pos - object_pos) < self.grasp_threshold
-    
-    def _check_lifted(self, object_pos):
-        if self.grasped_pos is None:
-            return False
-        return np.linalg.norm(object_pos[:2] - self.grasped_pos[:2]) < self.xy_above_threshold and \
-               (object_pos[2] - self.grasped_pos[2]) > self.z_above_threshold
-    
-    def _check_above_target(self, hand_pos, target_pos):
-        return np.linalg.norm(hand_pos[:2] - target_pos[:2]) < self.xy_above_threshold and \
-               (hand_pos[2] - target_pos[2]) > self.z_above_threshold
-    
-    def _check_placed(self, object_pos, target_pos):
-        return np.linalg.norm(object_pos - target_pos) < self.place_threshold 
-    
-    def _check_released(self, hand_pos, target_pos):
-        # TODO check force sensing
-        return np.linalg.norm(hand_pos - target_pos) < self.grasp_threshold
-    
-    
-    def plan(self, obs):
+    def plan(self, obs, mjData):
         ## Extract information from the observation
         joint_angles = obs['state'][:8]
-        hand_pos = obs['state'][8:11]
-        hand_quat = obs['state'][11:15]
+        actuator_forces = obs['state'][8:16]
+        hand_actuator_force = actuator_forces[-1]  # Last actuator is the hand
+        hand_pos = obs['state'][16:19]
+        hand_quat = obs['state'][19:23]
         object_pos = obs['object'][:3]
         object_quat = obs['object'][3:]
         target_pos = obs["target"][:3]
 
-        obs["grasped_pos"] = self.grasped_pos
-
         ## Task planning logic
+        ## This is a finite state machine that transitions between states based on the hand and object positions
         if self.state == "initial":
-            if self._check_above_object(hand_pos, object_pos):
-                self.state = "grasping_object"
+            if self._check_a_above_b(hand_pos, object_pos):
+                self.state = "approaching_object"
             else:
-                self.state = "move_above_object"
-            action = joint_angles.copy()  # No action needed, just update state
-        elif self.state == "move_above_object":
-            action = self.motion_planner.move_above(joint_angles, obs)
-            if self._check_above_object(hand_pos, object_pos):
+                self.state = "moving_above_object"
+        elif self.state == "moving_above_object":
+            if self._check_a_above_b(hand_pos, object_pos):
                 self.state = "approaching_object"
         elif self.state == "approaching_object":
-            action = self.motion_planner.approach(joint_angles, obs)
-            if self._check_graspable(hand_pos, object_pos):
+            if self._check_a_near_b(hand_pos, object_pos):
                 self.state = "grasping_object"
         elif self.state == "grasping_object":
-            action = self.motion_planner.grasp(joint_angles, obs)
-            if self._check_grasped(hand_pos, object_pos):
-                self.state = "lifting_object"
+            if self._check_grasped(hand_pos, object_pos, hand_actuator_force):
                 self.grasped_pos = object_pos.copy()
+                self.state = "lifting_object"
         elif self.state == "lifting_object":
-            action = self.motion_planner.lift(joint_angles, obs)
-            if self._check_lifted(object_pos):
-                self.state = "moving_to_target"
-        elif self.state == "moving_to_target":
-            action = self.motion_planner.move_to_target(joint_angles, obs)
-            if self._check_above_target(hand_pos, target_pos):
+            if not self._check_grasped(hand_pos, object_pos, hand_actuator_force):
+                self.state = "moving_above_object"
+            elif self._check_a_above_b(object_pos, self.grasped_pos):
+                self.state = "moving_above_target"
+        elif self.state == "moving_above_target":
+            if not self._check_grasped(hand_pos, object_pos, hand_actuator_force):
+                self.state = "moving_above_object"
+            elif self._check_a_above_b(hand_pos, target_pos):
                 self.state = "placing_object"
         elif self.state == "placing_object":
-            action = self.motion_planner.place(joint_angles, obs)
-            if self._check_placed(object_pos, target_pos):
-                self.state = "release_object"
-        elif self.state == "release_object":
-            action = self.motion_planner.release(joint_angles, obs)
-            if self._check_released(hand_pos, target_pos):
+            if not self._check_grasped(hand_pos, object_pos, hand_actuator_force):
+                self.state = "moving_above_object"
+            elif self._check_a_near_b(object_pos, target_pos):
+                self.state = "releasing_object"
+        elif self.state == "releasing_object":
+            if not self._check_grasped(hand_pos, object_pos, hand_actuator_force):
                 self.state = "success"
         elif self.state == "success":
-            action = joint_angles.copy()
+            pass
         else:
             raise ValueError(f"Unknown state: {self.state}")
-        return action, self.state
 
-            
-
-
+        ## Get the next action from the motion planner based on the current state
+        target_joint_angles = joint_angles.copy()  # Default action is to maintain current joint angles
+        if self.state == "initial":
+            pass
+        elif self.state == "moving_above_object":
+            target_hand_pos = object_pos.copy()
+            target_hand_pos[2] += self.z_above_threshold + self.z_above_theta
+            target_hand_quat = hand_quat.copy()
+            ikresults = ik.qpos_from_site_pose(
+                mjmodel=self.mjModel, 
+                mjdata=mjData, 
+                site_name="end_effector", 
+                target_pos=target_hand_pos, 
+                target_quat=target_hand_quat, 
+            )
+            target_joint_angles = ikresults[0][:8]
+        elif self.state == "approaching_object":
+            target_hand_pos = object_pos.copy()
+            target_hand_quat = hand_quat.copy()
+            ikresults = ik.qpos_from_site_pose(
+                mjmodel=self.mjModel, 
+                mjdata=mjData, 
+                site_name="end_effector", 
+                target_pos=target_hand_pos, 
+                target_quat=target_hand_quat, 
+            )
+            target_joint_angles = ikresults[0][:8]
+        elif self.state == "grasping_object":
+            target_joint_angles[-1] = 0.0  # Close the hand
+        elif self.state == "lifting_object":
+            target_hand_pos = self.grasped_pos.copy()
+            target_hand_pos[2] += self.z_above_threshold + self.z_above_theta
+            target_hand_quat = hand_quat.copy()
+            ikresults = ik.qpos_from_site_pose(
+                mjmodel=self.mjModel, 
+                mjdata=mjData, 
+                site_name="end_effector", 
+                target_pos=target_hand_pos, 
+                target_quat=target_hand_quat, 
+            )
+            target_joint_angles = ikresults[0][:8]
+        elif self.state == "moving_above_target":
+            target_hand_pos = target_pos.copy()
+            target_hand_pos[2] += self.z_above_threshold + self.z_above_theta
+            target_hand_quat = hand_quat.copy()
+            ikresults = ik.qpos_from_site_pose(
+                mjmodel=self.mjModel, 
+                mjdata=mjData, 
+                site_name="end_effector", 
+                target_pos=target_hand_pos, 
+                target_quat=target_hand_quat, 
+            )
+            target_joint_angles = ikresults[0][:8]
+        elif self.state == "placing_object":
+            target_hand_pos = target_pos.copy()
+            target_hand_quat = hand_quat.copy()
+            ikresults = ik.qpos_from_site_pose(
+                mjmodel=self.mjModel, 
+                mjdata=mjData, 
+                site_name="end_effector", 
+                target_pos=target_hand_pos, 
+                target_quat=target_hand_quat, 
+            )
+            target_joint_angles = ikresults[0][:8]
+        elif self.state == "releasing_object":
+            target_joint_angles[-1] = 255.0  # Open the hand
+        elif self.state == "success":
+            pass
+        action = self.motion_planner.get_action(joint_angles, target_joint_angles)
+        return action
