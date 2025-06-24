@@ -23,9 +23,10 @@ class PickPlaceCustomEnv():
         self.random_object_pos = random_object_pos
 
         ## Define action and observation space
-        # action_dim = self.model.nu # number of actuators/controls = dim(ctrl)
-        # action_low = self.model.actuator_ctrlrange[:, 0].copy()
-        # action_high = self.model.actuator_ctrlrange[:, 1].copy()
+        action_dim = self.model.nu # number of actuators/controls = dim(ctrl)
+        action_low = self.model.actuator_ctrlrange[:, 0].copy()
+        action_high = self.model.actuator_ctrlrange[:, 1].copy()
+        self.joint_limits = np.array([action_low, action_high]).T  # shape (nu, 2)
 
         ## Constants
         self.hand_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "hand")
@@ -93,10 +94,8 @@ class PickPlaceCustomEnv():
         return obs, info
 
     def step(self, action):
-        # self.data.ctrl[:] = action # takes in absolute joint angles
-
         ## Handle action
-        # self.data.ctrl[:] = action
+        self.data.ctrl[:] = action
         
         ## Step simulation
         mujoco.mj_step(self.model, self.data, 5) # 5 substeps 2ms each = 10ms total

@@ -1,7 +1,9 @@
 import os
 import numpy as np
 from pick_place_env import PickPlaceCustomEnv
+from rrt import RRT
 from planner import Planner
+
 
 ## Enviroment Hyperparameters
 random_object_pos = True # Randomize object position?
@@ -12,7 +14,7 @@ xml_path = os.path.join(os.path.dirname(__file__), "franka_emika_panda/scene_pic
 env = PickPlaceCustomEnv(xml_path, random_object_pos=random_object_pos, render_mode="human")
 
 ## Initialize the planner
-motion_planner = None  # Placeholder for a motion planner instance if needed
+motion_planner = RRT(env.joint_limits)  # Placeholder for a motion planner instance if needed
 planner = Planner(motion_planner, env.model)
 
 ## Reset the environment
@@ -25,7 +27,8 @@ for step in range(max_episode_steps):
     # action = np.random.uniform(-1.0, 1.0, size=env.model.nu)  # Random action
     obs, done, info = env.step(action)
     print(f"Joint Angles: {obs['state'][:8]}")
-    print(f"Hand Pose: {obs['state'][8:11]} | Hand Quat: {obs['state'][11:15]}")
+    print(f"Actuator Forces: {obs['state'][8:16]}")
+    print(f"Hand Pose: {obs['state'][16:19]} | Hand Quat: {obs['state'][19:23]}")
     print(f"Object Pose: {obs['object'][:3]} | Object Quat: {obs['object'][3:]}")
     print("Info:", info)
     env.render()

@@ -23,7 +23,7 @@ class Planner():
 
         # Constants for distance checks
         self.z_above_theta = 0.05 # Height above the object when moving above it
-        self.xy_above_threshold = 0.0005  # Distance threshold for checking if a is above b in the xy plane
+        self.xy_above_threshold = 0.005  # Distance threshold for checking if a is above b in the xy plane
         self.z_above_threshold = 0.1  # Height threshold for checking if a is above b in the z direction
         self.near_threshold = 0.001  # Distance threshold for checking if a is near b
         self.force_threshold = 0.1  # Force threshold for checking if the hand is grasping the object
@@ -100,7 +100,7 @@ class Planner():
             ikresults = ik.qpos_from_site_pose(
                 mjmodel=self.mjModel, 
                 mjdata=mjData, 
-                site_name="end_effector", 
+                site_name="hand", 
                 target_pos=target_hand_pos, 
                 target_quat=target_hand_quat, 
             )
@@ -111,7 +111,7 @@ class Planner():
             ikresults = ik.qpos_from_site_pose(
                 mjmodel=self.mjModel, 
                 mjdata=mjData, 
-                site_name="end_effector", 
+                site_name="hand", 
                 target_pos=target_hand_pos, 
                 target_quat=target_hand_quat, 
             )
@@ -125,7 +125,7 @@ class Planner():
             ikresults = ik.qpos_from_site_pose(
                 mjmodel=self.mjModel, 
                 mjdata=mjData, 
-                site_name="end_effector", 
+                site_name="hand", 
                 target_pos=target_hand_pos, 
                 target_quat=target_hand_quat, 
             )
@@ -137,7 +137,7 @@ class Planner():
             ikresults = ik.qpos_from_site_pose(
                 mjmodel=self.mjModel, 
                 mjdata=mjData, 
-                site_name="end_effector", 
+                site_name="hand", 
                 target_pos=target_hand_pos, 
                 target_quat=target_hand_quat, 
             )
@@ -148,7 +148,7 @@ class Planner():
             ikresults = ik.qpos_from_site_pose(
                 mjmodel=self.mjModel, 
                 mjdata=mjData, 
-                site_name="end_effector", 
+                site_name="hand", 
                 target_pos=target_hand_pos, 
                 target_quat=target_hand_quat, 
             )
@@ -158,4 +158,11 @@ class Planner():
         elif self.state == "success":
             pass
         action = self.motion_planner.get_action(joint_angles, target_joint_angles)
+        
+        print(f"Planner State: {self.state}")
+        print(f"Current Joint Angles: {joint_angles}")
+        print(f"Current Hand Position: {hand_pos}")
+        print(f"Current Object Position: {object_pos}")
+        print(f"Target Joint Angles: {target_joint_angles}")
+        print(f"Action: {action}")
         return action
