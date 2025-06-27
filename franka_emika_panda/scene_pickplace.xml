@@ -26,10 +26,10 @@
     </body>
 
     <!-- Object to pick -->
-    <!-- Density close to polystrene -->
-    <body name="object" pos="0.4 0 0.225">
+    <!-- Density close to polystrene friction="2.0 0.1 0.1-->
+    <body name="object" pos="0.4 0 0.22">
         <joint name="object_joint" type="free"/>
-        <geom name="object_geom" type="box" size="0.025 0.025 0.025" rgba="0 1 0 1" mass="0.005" friction="2.0 0.1 0.1"/>
+        <geom name="object_geom" type="box" size="0.02 0.02 0.02" rgba="0 1 0 1" mass="0.01"/>
     </body>
 
     <!-- Goal Placement -->

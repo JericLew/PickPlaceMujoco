@@ -37,7 +37,7 @@ class Planner():
         self.motion_repanning_interval = 0.5  # Time interval for motion replanning motion
         self.state_timeout = 5.0  # Time to wait before replanning if no progress is made
         self.z_above_theta = 0.05 # Height offset from target height
-        self.xy_above_threshold = 0.015 # Distance threshold for checking if a is near b in the xy plane
+        self.xy_above_threshold = 0.010 # Distance threshold for checking if a is near b in the xy plane
         self.z_above_threshold = 0.1  # Height threshold for checking if a is above b in the z direction
         self.near_threshold = 0.020  # Distance threshold for checking if a is near b
         self.joint_angle_threshold = 0.01  # Threshold for joint angle changes to consider a new action
@@ -53,7 +53,7 @@ class Planner():
         return np.linalg.norm(a_pos - b_pos) < self.near_threshold
 
     def _check_grasped(self, gripper_dist):
-        return gripper_dist < 0.0255 # NOTE magic num
+        return gripper_dist < 0.0225 # NOTE magic num
 
     def _check_released(self, gripper_dist):
         return gripper_dist > 0.035 # NOTE magic num
@@ -123,11 +123,13 @@ class Planner():
                     self.state = "releasing_object"
             
             elif self.state == "releasing_object":
-                if not self._check_released(gripper_dist):
-                    self.state = "success"
+                if self._check_released(gripper_dist):
+                    self.state = "moving_away_from_object"
+                elif self._check_timeout():
+                    self.state = "moving_above_object"
             
             elif self.state == "moving_away_from_object":
-                if not self._check_a_near_b(grasp_site_pos, object_pos) and self._check_a_near_b(object_pos, goal_pos):
+                if self._check_a_above_b(grasp_site_pos, object_pos) and self._check_a_near_b(object_pos, goal_pos):
                     self.state = "success"
 
             elif self.state == "success":
@@ -233,7 +235,7 @@ class Planner():
             elif self.state == "releasing_object":
                 pass
 
-            elif self.state == "moving_away_object":
+            elif self.state == "moving_away_from_object":
                 target_grasp_site_pos = object_pos.copy()
                 target_grasp_site_pos[2] += self.z_above_threshold + self.z_above_theta
                 # target_hand_quat = hand_quat.copy()

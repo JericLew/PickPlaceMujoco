@@ -88,7 +88,8 @@ class PickPlaceCustomEnv():
         mujoco.mj_forward(self.model, self.data)
 
         ## Data for status checking
-        self.goal_pos = self.model.body(f"{object_color_name[0]}_goal").pos.copy()
+        self.goal_pos = self.model.body(f"{object_color_name[0]}_goal").pos.copy()\
+            + np.array([0.0, 0.0, self.goal_geom_height + self.object_geom_height]) # Goal is at top of block, so add heights offset
         self.current_object_pos = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 3].copy()
         self.current_object_vel = self.data.qvel[self.object_qpos_addr : self.object_qpos_addr + 3].copy()
 
@@ -143,7 +144,7 @@ class PickPlaceCustomEnv():
         # object_qvel = self.data.qvel[self.object_qpos_addr : self.object_qpos_addr + 7] # object velocity
         
         ## Goal information
-        goal_pos = self.goal_pos.copy().astype(np.float32) + np.array([0.0, 0.0, self.goal_geom_height + self.object_geom_height]) # Goal is at top of block, so add height offset
+        goal_pos = self.goal_pos.copy().astype(np.float32)
 
         obs = {"state": state, "object": object, "goal": goal_pos}
         return obs
@@ -155,7 +156,7 @@ class PickPlaceCustomEnv():
     def _check_success(self):
         near_goal_xy = np.linalg.norm(self.current_object_pos[:2] - self.goal_pos[:2]) < self.goal_geom_radius
         near_goal_z = np.abs(self.current_object_pos[2] - self.goal_pos[2]) < self.goal_geom_height + 2 * self.object_geom_height
-        still = np.linalg.norm(self.current_object_vel) < 0.001 # NOTE arbitrary speed threshold
+        still = np.linalg.norm(self.current_object_vel) < 0.01 # NOTE arbitrary speed threshold
         gripper_is_far_from_object = np.linalg.norm(self.data.site_xpos[self.grasp_site_id] - self.current_object_pos) > 2 * self.object_geom_height
         return near_goal_xy and near_goal_z and still and gripper_is_far_from_object
         

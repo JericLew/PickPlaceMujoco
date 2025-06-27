@@ -29,53 +29,6 @@ class RRT():
         if np.all(np.abs(direction) <= self.step_size):
             return to_angle
         return new_node
-
-    def is_collision_free(self, q1, q2):
-        # Placeholder: always returns True
-        # Replace with actual collision checking
-        return True
-
-    def get_action(self, current_joint_angles, target_joint_angles):
-        """
-        Plans a path from current_joint_angles to target_joint_angles using RRT.
-        Returns the next joint angles to move towards.
-        """
-        nodes = [np.array(current_joint_angles)]
-        parents = [-1]
-
-        for i in range(self.max_iter):
-            if random.random() < 0.1:
-                sample = np.array(target_joint_angles)
-            else:
-                sample = self.sample()
-
-            # Find nearest node
-            dists = [np.linalg.norm(n - sample) for n in nodes]
-            nearest_idx = np.argmin(dists)
-            nearest = nodes[nearest_idx]
-
-            new_node = self.steer(nearest, sample)
-            if self.is_collision_free(nearest, new_node):
-                nodes.append(new_node)
-                parents.append(nearest_idx)
-
-                # Check if goal is reached
-                if np.all(np.abs(new_node - target_joint_angles) <= np.array(self.step_size)):
-                    # Reconstruct path
-                    path = [new_node]
-                    idx = len(nodes) - 1
-                    while parents[idx] != -1:
-                        idx = parents[idx]
-                        path.append(nodes[idx])
-                    path.reverse()
-                    # Return the next step towards the goal
-                    if len(path) > 1:
-                        return path[1]
-                    else:
-                        return path[0]
-
-        # If no path found, return current position
-        return np.array(current_joint_angles)
     
     def get_actions(self, current_joint_angles, target_joint_angles):
         """
@@ -97,20 +50,19 @@ class RRT():
             nearest = nodes[nearest_idx]
 
             new_node = self.steer(nearest, sample)
-            if self.is_collision_free(nearest, new_node):
-                nodes.append(new_node)
-                parents.append(nearest_idx)
+            nodes.append(new_node)
+            parents.append(nearest_idx)
 
-                # Check if goal is reached
-                if np.all(np.abs(new_node - target_joint_angles) <= np.array(self.step_size)):
-                    # Reconstruct path
-                    path = [new_node]
-                    idx = len(nodes) - 1
-                    while parents[idx] != -1:
-                        idx = parents[idx]
-                        path.append(nodes[idx])
-                    path.reverse()
-                    return path  # Return the full sequence of actions
+            # Check if goal is reached
+            if np.all(np.abs(new_node - target_joint_angles) <= np.array(self.step_size)):
+                # Reconstruct path
+                path = [new_node]
+                idx = len(nodes) - 1
+                while parents[idx] != -1:
+                    idx = parents[idx]
+                    path.append(nodes[idx])
+                path.reverse()
+                return path  # Return the full sequence of actions
 
         # If no path found, return just the start position
         return [np.array(current_joint_angles)]

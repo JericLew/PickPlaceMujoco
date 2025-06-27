@@ -35,14 +35,15 @@ while True:
     action = planner.plan(obs, env.data)  # Use the planner to get the action
     # action = np.random.uniform(-1.0, 1.0, size=env.model.nu)  # Random action
     obs, done, info = env.step(action)
-    print(f"Joint Angles: {obs['state'][:9]}")
-    print(f"Hand Pose: {obs['state'][9:12]} | Hand Quat: {obs['state'][12:16]}")
-    print(f"Object Pose: {obs['object'][:3]} | Object Quat: {obs['object'][3:]}")
-    print(f"Goal Position: {obs['goal']}")
-    print("Info:", info)
+    # print(f"Joint Angles: {obs['state'][:9]}")
+    # print(f"Hand Pose: {obs['state'][9:12]} | Hand Quat: {obs['state'][12:16]}")
+    # print(f"Object Pose: {obs['object'][:3]} | Object Quat: {obs['object'][3:]}")
+    # print(f"Goal Position: {obs['goal']}")
+    # print("Info:", info)
     env.render()
     if done:
         print("Episode done!")
+        time.sleep(5)  # Wait a bit before closing
         break
 
     elapsed_time = time.time() - start_time
