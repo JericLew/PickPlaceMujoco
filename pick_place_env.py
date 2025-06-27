@@ -39,9 +39,12 @@ class PickPlaceCustomEnv():
         self.grasp_site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "grasp_site")
         self.object_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "object")
         self.object_qpos_addr = self.model.jnt_qposadr[self.model.body_jntadr[self.object_body_id]]
+        self.object_geom_height = self.model.geom("object_geom").size[2]  # Height of the object geom
+        self.goal_geom_radius = self.model.geom("r_goal_geom").size[0]  # Radius of the goal geom
+        self.goal_geom_height = self.model.geom("r_goal_geom").size[1]  # Height of the goal geom
 
         ## Data for status checking
-        self.target_object_pos = None
+        self.goal_pos = None
         self.current_object_pos = None
         self.current_object_vel = None
 
@@ -84,8 +87,8 @@ class PickPlaceCustomEnv():
 
         mujoco.mj_forward(self.model, self.data)
 
-        ## Set data for rewards calculation
-        self.target_object_pos = self.model.body(f"{object_color_name[0]}_target").pos.copy()
+        ## Data for status checking
+        self.goal_pos = self.model.body(f"{object_color_name[0]}_goal").pos.copy()
         self.current_object_pos = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 3].copy()
         self.current_object_vel = self.data.qvel[self.object_qpos_addr : self.object_qpos_addr + 3].copy()
 
@@ -127,7 +130,7 @@ class PickPlaceCustomEnv():
         """
         "state": (16,) robot state information (9 joint angles, 3 grasp site position, 4 hand quaternion)
         "object": (7,) object position (x,y,z) and quaternion (qx,qy,qz,qw)
-        "target": (3,) target object position (x,y,z)
+        "goal": (3,) goal position (x,y,z)
         """
         ## Robot state information
         robot_joint_angles = self.data.qpos[:9].copy().astype(np.float32) # 9 joint angles (7 for the arm, 2 for the gripper)
@@ -139,10 +142,10 @@ class PickPlaceCustomEnv():
         object = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 7].copy().astype(np.float32) # object position and quaternion
         # object_qvel = self.data.qvel[self.object_qpos_addr : self.object_qpos_addr + 7] # object velocity
         
-        ## Target information
-        target_object_pos = self.target_object_pos.copy().astype(np.float32)
+        ## Goal information
+        goal_pos = self.goal_pos.copy().astype(np.float32) + np.array([0.0, 0.0, self.goal_geom_height + self.object_geom_height]) # Goal is at top of block, so add height offset
 
-        obs = {"state": state, "object": object, "target": target_object_pos}
+        obs = {"state": state, "object": object, "goal": goal_pos}
         return obs
     
     def _get_done(self):
@@ -150,11 +153,11 @@ class PickPlaceCustomEnv():
         return done
     
     def _check_success(self):
-        near_target_xy = np.linalg.norm(self.current_object_pos[:2] - self.target_object_pos[:2]) < 0.10 # NOTE arbitrary distance threshold
-        near_target_z = np.abs(self.current_object_pos[2] - self.target_object_pos[2]) < 0.125 # NOTE arbitrary height threshold 0.075 + 0.025 < z_dist
-        still = np.linalg.norm(self.current_object_vel) < 0.01 # NOTE arbitrary speed threshold
-        gripper_is_far_from_object = np.linalg.norm(self.data.site_xpos[self.grasp_site_id] - self.current_object_pos) > 0.1 # NOTE arbitrary distance threshold
-        return near_target_xy and near_target_z and still and gripper_is_far_from_object
+        near_goal_xy = np.linalg.norm(self.current_object_pos[:2] - self.goal_pos[:2]) < self.goal_geom_radius
+        near_goal_z = np.abs(self.current_object_pos[2] - self.goal_pos[2]) < self.goal_geom_height + 2 * self.object_geom_height
+        still = np.linalg.norm(self.current_object_vel) < 0.001 # NOTE arbitrary speed threshold
+        gripper_is_far_from_object = np.linalg.norm(self.data.site_xpos[self.grasp_site_id] - self.current_object_pos) > 2 * self.object_geom_height
+        return near_goal_xy and near_goal_z and still and gripper_is_far_from_object
         
     def render(self):
         time_now = time.time()
@@ -204,7 +207,7 @@ if __name__ == "__main__":
         print(f"Joint Angles: {obs['state'][:9]}")
         print(f"Hand Pose: {obs['state'][9:12]} | Hand Quat: {obs['state'][12:16]}")
         print(f"Object Pose: {obs['object'][:3]} | Object Quat: {obs['object'][3:]}")
-        print(f"Target Object Position: {obs['target']}")
+        print(f"Goal Position: {obs['goal']}")
         print("Info:", info)
         env.render()
         if done:

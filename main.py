@@ -19,9 +19,9 @@ env = PickPlaceCustomEnv(xml_path,
                          )
 
 ## Initialize the planner
-print(f"joint_limits: {env.joint_limits}")
-motion_planner = RRT(env.joint_limits[:7], step_size=(0.05,) * 7)  # Placeholder for a motion planner instance if needed
-planner = Planner(motion_planner, env.model)
+print(f"Joint Limits: {env.joint_limits}")
+motion_planner = RRT(env.joint_limits[:7], step_size=(0.035,) * 7)  # Placeholder for a motion planner instance if needed
+planner = Planner(motion_planner, env.model, debug=False)
 
 ## Reset the environment
 obs, info = env.reset()
@@ -38,7 +38,7 @@ while True:
     print(f"Joint Angles: {obs['state'][:9]}")
     print(f"Hand Pose: {obs['state'][9:12]} | Hand Quat: {obs['state'][12:16]}")
     print(f"Object Pose: {obs['object'][:3]} | Object Quat: {obs['object'][3:]}")
-    print(f"Target Object Position: {obs['target']}")
+    print(f"Goal Position: {obs['goal']}")
     print("Info:", info)
     env.render()
     if done:
