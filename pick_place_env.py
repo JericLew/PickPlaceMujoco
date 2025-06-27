@@ -1,9 +1,11 @@
+import time
 import numpy as np
+
 import mujoco
 import mujoco.viewer
 
 class PickPlaceCustomEnv():
-    def __init__(self, xml_path, random_object_pos=False, render_mode="human"):
+    def __init__(self, xml_path, random_object_pos=False, simulation_steps=10, render_mode="human", render_fps=30):
         print("Initializing PickPlaceCustomEnv...")
         self.np_random = None
 
@@ -19,6 +21,10 @@ class PickPlaceCustomEnv():
         self.model = mujoco.MjModel.from_xml_path(xml_path)
         self.data = mujoco.MjData(self.model)
 
+        ## Simulation parameters
+        self.simulation_steps = simulation_steps  # Number of substeps for each step
+        self.simulation_step_time = 0.002 * simulation_steps  # Each mujoco step is 2ms, so total time for one env step is 2ms * simulation_steps
+
         ## Option Flags
         self.random_object_pos = random_object_pos
 
@@ -30,11 +36,11 @@ class PickPlaceCustomEnv():
 
         ## Constants
         self.hand_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "hand")
+        self.grasp_site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "grasp_site")
         self.object_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "object")
         self.object_qpos_addr = self.model.jnt_qposadr[self.model.body_jntadr[self.object_body_id]]
 
-        ## Data for rewards calculation
-        self.initial_object_pos = None
+        ## Data for status checking
         self.target_object_pos = None
         self.current_object_pos = None
         self.current_object_vel = None
@@ -44,6 +50,8 @@ class PickPlaceCustomEnv():
 
         ## Rendering
         self.render_mode = render_mode
+        self.render_fps = render_fps
+        self.last_render_time = 0.0
         self.viewer = None
 
     def reset(self, seed=None, options=None):
@@ -68,7 +76,7 @@ class PickPlaceCustomEnv():
             object_delta_x_pos = self.np_random.uniform(-0.15, 0.15)
             object_delta_y_pos = self.np_random.uniform(-0.15, 0.15)
         else: # Fixed object position
-            object_delta_x_pos = 0.05
+            object_delta_x_pos = 0.0
             object_delta_y_pos = 0.0
         new_object_pos = self.model.body("object").pos.copy()
         new_object_pos[:2] += (object_delta_x_pos, object_delta_y_pos)
@@ -77,9 +85,8 @@ class PickPlaceCustomEnv():
         mujoco.mj_forward(self.model, self.data)
 
         ## Set data for rewards calculation
-        self.target_object_pos = self.model.body("target").pos.copy()
-        self.initial_object_pos = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 3].copy()
-        self.current_object_pos = self.initial_object_pos.copy()
+        self.target_object_pos = self.model.body(f"{object_color_name[0]}_target").pos.copy()
+        self.current_object_pos = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 3].copy()
         self.current_object_vel = self.data.qvel[self.object_qpos_addr : self.object_qpos_addr + 3].copy()
 
         ## Set termination flags
@@ -98,7 +105,7 @@ class PickPlaceCustomEnv():
         self.data.ctrl[:] = action
         
         ## Step simulation
-        mujoco.mj_step(self.model, self.data, 5) # 5 substeps 2ms each = 10ms total
+        mujoco.mj_step(self.model, self.data, self.simulation_steps) # 2ms each 
 
         ## Update object info
         self.current_object_pos = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 3].copy() # x,y,z
@@ -117,21 +124,25 @@ class PickPlaceCustomEnv():
         return obs, done, info
     
     def _get_obs(self):
+        """
+        "state": (16,) robot state information (9 joint angles, 3 grasp site position, 4 hand quaternion)
+        "object": (7,) object position (x,y,z) and quaternion (qx,qy,qz,qw)
+        "target": (3,) target object position (x,y,z)
+        """
         ## Robot state information
-        robot_joint_angles = self.data.qpos[:8].copy().astype(np.float32) # 8 joint angles
-        robot_actuator_forces = self.data.actuator_force[:8].copy().astype(np.float32) # 8 actuator forces
-        hand_pos = self.data.xpos[self.hand_id].copy().astype(np.float32) # 3 hand position
+        robot_joint_angles = self.data.qpos[:9].copy().astype(np.float32) # 9 joint angles (7 for the arm, 2 for the gripper)
+        grasp_site_pos = self.data.site_xpos[self.grasp_site_id].copy().astype(np.float32) # 3 grasp site position
         hand_quat = self.data.xquat[self.hand_id].copy().astype(np.float32) # 4 hand quaternion
-        state = np.concatenate([robot_joint_angles, robot_actuator_forces, hand_pos, hand_quat]).astype(np.float32) # (8 + 8 + 3 + 4) = 23 state dimensions
+        state = np.concatenate([robot_joint_angles, grasp_site_pos, hand_quat]).astype(np.float32) # (9 + 3 + 4) = 16
 
         ## Object information
         object = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 7].copy().astype(np.float32) # object position and quaternion
         # object_qvel = self.data.qvel[self.object_qpos_addr : self.object_qpos_addr + 7] # object velocity
         
         ## Target information
-        target_pos = self.target_object_pos.copy().astype(np.float32) # target position
+        target_object_pos = self.target_object_pos.copy().astype(np.float32)
 
-        obs = {"state": state, "object": object, "target": target_pos}
+        obs = {"state": state, "object": object, "target": target_object_pos}
         return obs
     
     def _get_done(self):
@@ -139,15 +150,21 @@ class PickPlaceCustomEnv():
         return done
     
     def _check_success(self):
-        in_target = np.linalg.norm(self.current_object_pos[:2] - self.target_object_pos[:2]) < 0.10
+        near_target_xy = np.linalg.norm(self.current_object_pos[:2] - self.target_object_pos[:2]) < 0.10 # NOTE arbitrary distance threshold
+        near_target_z = np.abs(self.current_object_pos[2] - self.target_object_pos[2]) < 0.125 # NOTE arbitrary height threshold 0.075 + 0.025 < z_dist
         still = np.linalg.norm(self.current_object_vel) < 0.01 # NOTE arbitrary speed threshold
-        return in_target # and still
+        gripper_is_far_from_object = np.linalg.norm(self.data.site_xpos[self.grasp_site_id] - self.current_object_pos) > 0.1 # NOTE arbitrary distance threshold
+        return near_target_xy and near_target_z and still and gripper_is_far_from_object
         
     def render(self):
+        time_now = time.time()
         if self.render_mode == "human":
             if self.viewer is None:
                 self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
-            self.viewer.sync()
+            if time_now - self.last_render_time >= 1.0 / self.render_fps:
+                self.viewer.sync()
+                self.last_render_time = time_now
+            # self.viewer.sync()
 
     def close(self):
         if self.viewer:
@@ -157,28 +174,48 @@ class PickPlaceCustomEnv():
 
 if __name__ == "__main__":
     import os
+    import time
+    import numpy as np
+    from pick_place_env import PickPlaceCustomEnv
+
 
     ## Enviroment Hyperparameters
     random_object_pos = True # Randomize object position?
-    max_episode_steps = 10000
 
+    ## Initialize the environment
     xml_path = os.path.join(os.path.dirname(__file__), "franka_emika_panda/scene_pickplace.xml")
-    env = PickPlaceCustomEnv(xml_path, random_object_pos=random_object_pos, render_mode="human")
+    env = PickPlaceCustomEnv(xml_path, 
+                             random_object_pos=random_object_pos,
+                             render_mode="human",
+                             render_fps=3
+                             )
+
+    ## Reset the environment
     obs, info = env.reset()
     print("Initial Observation:", obs)
-    
-    for step in range(max_episode_steps):
+
+    step = 0
+    while True:
+        start_time = time.time()
+
         print(f"Step: {step}")
         action = np.random.uniform(-1.0, 1.0, size=env.model.nu)  # Random action
         obs, done, info = env.step(action)
-        print(f"Joint Angles: {obs['state'][:8]}")
-        print(f"Hand Pose: {obs['state'][8:11]} | Hand Quat: {obs['state'][11:15]}")
+        print(f"Joint Angles: {obs['state'][:9]}")
+        print(f"Hand Pose: {obs['state'][9:12]} | Hand Quat: {obs['state'][12:16]}")
         print(f"Object Pose: {obs['object'][:3]} | Object Quat: {obs['object'][3:]}")
+        print(f"Target Object Position: {obs['target']}")
         print("Info:", info)
         env.render()
         if done:
             print("Episode done!")
             break
         print(f"=="*20)
+        step += 1
+
+        elapsed_time = time.time() - start_time
+        print(f"Elapsed time for step: {elapsed_time * 1000:.4f} ms")
+        if elapsed_time < env.simulation_step_time:
+            time.sleep(env.simulation_step_time - elapsed_time)
 
     env.close()

@@ -2,14 +2,19 @@ import numpy as np
 import random
 
 class RRT():
-    def __init__(self, joint_limits, step_size=0.1, max_iter=1000):
+    def __init__(self, joint_limits, step_size=(0.1,), max_iter=10000):
         """
         joint_limits: list of (min, max) tuples for each joint
-        step_size: how far to extend towards sampled points
+        step_size: tuple of step sizes for each joint
         max_iter: maximum number of iterations
         """
         self.joint_limits = joint_limits
-        self.step_size = step_size
+        if isinstance(step_size, (float, int)):
+            self.step_size = np.array([step_size] * len(joint_limits))
+        elif len(step_size) == 1 and len(joint_limits) > 1:
+            self.step_size = np.array([step_size[0]] * len(joint_limits))
+        else:
+            self.step_size = np.array(step_size)
         self.max_iter = max_iter
 
     def sample(self):
@@ -17,10 +22,13 @@ class RRT():
 
     def steer(self, from_angle, to_angle):
         direction = to_angle - from_angle
-        dist = np.linalg.norm(direction)
-        if dist < self.step_size:
+        # Scale direction by per-joint step size
+        step = np.clip(direction, -self.step_size, self.step_size)
+        new_node = from_angle + step
+        # If all joints are within step size, just return to_angle
+        if np.all(np.abs(direction) <= self.step_size):
             return to_angle
-        return from_angle + self.step_size * direction / dist
+        return new_node
 
     def is_collision_free(self, q1, q2):
         # Placeholder: always returns True
@@ -52,7 +60,7 @@ class RRT():
                 parents.append(nearest_idx)
 
                 # Check if goal is reached
-                if np.linalg.norm(new_node - target_joint_angles) < self.step_size:
+                if np.all(np.abs(new_node - target_joint_angles) <= np.array(self.step_size)):
                     # Reconstruct path
                     path = [new_node]
                     idx = len(nodes) - 1
