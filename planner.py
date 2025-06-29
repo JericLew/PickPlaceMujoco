@@ -33,11 +33,11 @@ class Planner():
         self.mjModel = mjModel
 
         # Constants for distance checks
-        self.task_replanning_interval = 2.0  # Time interval for task replanning
-        self.motion_repanning_interval = 0.5  # Time interval for motion replanning motion
-        self.state_timeout = 5.0  # Time to wait before replanning if no progress is made
-        self.z_above_theta = 0.05 # Height offset from target height
-        self.xy_above_threshold = 0.010 # Distance threshold for checking if a is near b in the xy plane
+        self.task_replanning_interval = 1.0  # Time interval for task replanning
+        self.motion_repanning_interval = 5.0  # Time interval for motion replanning motion
+        self.state_timeout = 2.5  # Time to wait before replanning if no progress is made
+        self.z_above_theta = 0.06 # Height offset from target height
+        self.xy_above_threshold = 0.020 # Distance threshold for checking if a is near b in the xy plane
         self.z_above_threshold = 0.1  # Height threshold for checking if a is above b in the z direction
         self.near_threshold = 0.020  # Distance threshold for checking if a is near b
         self.joint_angle_threshold = 0.01  # Threshold for joint angle changes to consider a new action
@@ -58,6 +58,19 @@ class Planner():
     def _check_released(self, gripper_dist):
         return gripper_dist > 0.035 # NOTE magic num
     
+    def reset(self):
+        """Reset the planner to the initial state."""
+        self.prev_task_plan_time = time.time()
+        self.prev_motion_plan_time = time.time()
+        self.prev_state_time = time.time()
+        self.current_time = time.time()
+        self.prev_state = "initial"
+        self.state = "initial"
+        self.grasped_pos = None
+        self.planned_joint_actions = []
+        self.planned_joint_actions_index = 0
+        self.target_gripper_dist = 255.0
+    
     def plan(self, obs, mjData):
         ## Update the current time
         self.current_time = time.time()
@@ -66,7 +79,7 @@ class Planner():
         joint_angles = obs['state'][:7]  # 7 joint angles excluding the gripper
         gripper_dist = obs['state'][7] # Gripper distance (0.0 for closed, 0.04 for open)
         grasp_site_pos = obs['state'][9:12]  # Next 3 elements are grasp site position
-        hand_quat = obs['state'][12:16]  # Next 4 elements are hand quaternion
+        grasp_site_quat = obs['state'][12:16]  # Next 4 elements are grasp site quaternion
         object_pos = obs['object'][:3]
         object_quat = obs['object'][3:]
         goal_pos = obs["goal"][:3]
@@ -153,7 +166,7 @@ class Planner():
             target_joint_angles = joint_angles.copy()  # Default target joint angles are the current ones
             self.target_gripper_dist = 255.0  # Default gripper position (open)
             target_grasp_site_pos = grasp_site_pos.copy()  # Default grasp site position is the current one
-            target_hand_quat = np.array([-0.00484384,  0.707124,   0.7070547,  -0.00508084]) # Default hand quaternion (original hand orientation) NOTE: magic num
+            target_grasp_site_quat = np.array([1, 0, 0, 0], dtype=np.float32)  # Default grasp site quaternion (identity)
 
             if self.state == "initial":
                 pass
@@ -161,26 +174,26 @@ class Planner():
             elif self.state == "moving_above_object":
                 target_grasp_site_pos = object_pos.copy()
                 target_grasp_site_pos[2] += self.z_above_threshold + self.z_above_theta
-                # target_hand_quat = hand_quat.copy()
+                # target_grasp_site_quat = object_quat.copy()
                 ikresults = ik.qpos_from_site_pose(
                     mjmodel=self.mjModel, 
                     mjdata=mjData, 
                     site_name="grasp_site", 
                     target_pos=target_grasp_site_pos, 
-                    target_quat=target_hand_quat, 
+                    target_quat=target_grasp_site_quat, 
                     joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
                 )
                 target_joint_angles = ikresults[0][:7]
 
             elif self.state == "approaching_object":
                 target_grasp_site_pos = object_pos.copy()
-                # target_hand_quat = hand_quat.copy()
+                # target_grasp_site_quat = object_quat.copy()
                 ikresults = ik.qpos_from_site_pose(
                     mjmodel=self.mjModel, 
                     mjdata=mjData, 
                     site_name="grasp_site", 
                     target_pos=target_grasp_site_pos, 
-                    target_quat=target_hand_quat, 
+                    target_quat=target_grasp_site_quat, 
                     joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
                 )
                 target_joint_angles = ikresults[0][:7]
@@ -191,13 +204,12 @@ class Planner():
             elif self.state == "lifting_object":
                 target_grasp_site_pos = self.grasped_pos.copy()
                 target_grasp_site_pos[2] += self.z_above_threshold + self.z_above_theta
-                # target_hand_quat = hand_quat.copy()
                 ikresults = ik.qpos_from_site_pose(
                     mjmodel=self.mjModel, 
                     mjdata=mjData, 
                     site_name="grasp_site", 
                     target_pos=target_grasp_site_pos, 
-                    target_quat=target_hand_quat, 
+                    target_quat=target_grasp_site_quat, 
                     joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
                 )
                 target_joint_angles = ikresults[0][:7]
@@ -206,13 +218,12 @@ class Planner():
             elif self.state == "moving_above_goal":
                 target_grasp_site_pos = goal_pos.copy()
                 target_grasp_site_pos[2] += self.z_above_threshold + self.z_above_theta
-                # target_hand_quat = hand_quat.copy()
                 ikresults = ik.qpos_from_site_pose(
                     mjmodel=self.mjModel, 
                     mjdata=mjData, 
                     site_name="grasp_site", 
                     target_pos=target_grasp_site_pos, 
-                    target_quat=target_hand_quat, 
+                    target_quat=target_grasp_site_quat, 
                     joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
                 )
                 target_joint_angles = ikresults[0][:7]
@@ -220,13 +231,12 @@ class Planner():
 
             elif self.state == "placing_object":
                 target_grasp_site_pos = goal_pos.copy()
-                # target_hand_quat = hand_quat.copy()
                 ikresults = ik.qpos_from_site_pose(
                     mjmodel=self.mjModel, 
                     mjdata=mjData, 
                     site_name="grasp_site", 
                     target_pos=target_grasp_site_pos, 
-                    target_quat=target_hand_quat, 
+                    target_quat=target_grasp_site_quat, 
                     joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
                 )
                 target_joint_angles = ikresults[0][:7]
@@ -238,13 +248,13 @@ class Planner():
             elif self.state == "moving_away_from_object":
                 target_grasp_site_pos = object_pos.copy()
                 target_grasp_site_pos[2] += self.z_above_threshold + self.z_above_theta
-                # target_hand_quat = hand_quat.copy()
+                # target_grasp_site_quat = object_quat.copy()
                 ikresults = ik.qpos_from_site_pose(
                     mjmodel=self.mjModel, 
                     mjdata=mjData, 
                     site_name="grasp_site", 
                     target_pos=target_grasp_site_pos, 
-                    target_quat=target_hand_quat, 
+                    target_quat=target_grasp_site_quat, 
                     joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
                 )
                 target_joint_angles = ikresults[0][:7]
@@ -263,10 +273,10 @@ class Planner():
 
             ## Debugging information
             if self.debug:
-                print(f"Current Joint Angles: {joint_angles} | Current Gripper Position: {gripper_dist}")
-                print(f"Target Joint Angles: {target_joint_angles} | Target Gripper Position: {self.target_gripper_dist}")
-                print(f"Grasp Site Position: {grasp_site_pos} | Hand Quaternion: {hand_quat}")
-                print(f"Target Grasp Site Position: {target_grasp_site_pos} | Target Hand Quaternion: {target_hand_quat}")
+                print(f"Current (Joint Angles: {joint_angles} | Gripper Position: {gripper_dist})")
+                print(f"Target (Joint Angles: {target_joint_angles} | Target Gripper Position: {self.target_gripper_dist})")
+                print(f"Current Grasp Site (Position: {grasp_site_pos} | Quaternion: {grasp_site_quat})")
+                print(f"Target Grasp Site (Position: {target_grasp_site_pos} | Quaternion: {target_grasp_site_quat})")
                 print(f"Grasped Object Position: {self.grasped_pos} | Goal Position: {goal_pos}")
                 print(f"Object Position: {object_pos} | Object Quaternion: {object_quat}")
 

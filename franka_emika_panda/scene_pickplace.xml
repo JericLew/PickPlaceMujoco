@@ -26,21 +26,21 @@
     </body>
 
     <!-- Object to pick -->
-    <!-- Density close to polystrene friction="2.0 0.1 0.1-->
+    <!-- Density close to polystrene -->
     <body name="object" pos="0.4 0 0.22">
         <joint name="object_joint" type="free"/>
-        <geom name="object_geom" type="box" size="0.02 0.02 0.02" rgba="0 1 0 1" mass="0.01"/>
+        <geom name="object_geom" type="box" size="0.02 0.02 0.02" rgba="0 1 0 1" mass="0.005" friction="2.0 0.005 0.0001"/>
     </body>
 
     <!-- Goal Placement -->
     <body name="r_goal" pos="0 0.4 0.075">
-        <geom name="r_goal_geom" type="cylinder" size="0.1 0.075" rgba="1 0 0 1"/>
+        <geom name="r_goal_geom" type="cylinder" size="0.1 0.075" rgba="0.5 0.25 0.25 1"/>
     </body>
     <body name="g_goal" pos="-0.4 0 0.075">
-        <geom name="g_goal_geom" type="cylinder" size="0.1 0.075" rgba="0 1 0 1"/>
+        <geom name="g_goal_geom" type="cylinder" size="0.1 0.075" rgba="0.25 0.5 0.25 1"/>
     </body>
     <body name="b_goal" pos="0 -0.4 0.075">
-        <geom name="b_goal_geom" type="cylinder" size="0.1 0.075" rgba="0 0 1 1"/>
+        <geom name="b_goal_geom" type="cylinder" size="0.1 0.075" rgba="0.25 0.25 0.5 1"/>
     </body>
   </worldbody>
 

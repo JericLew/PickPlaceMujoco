@@ -5,10 +5,11 @@ import mujoco
 import mujoco.viewer
 
 class PickPlaceCustomEnv():
-    def __init__(self, xml_path, random_object_pos=False, simulation_steps=10, render_mode="human", render_fps=30):
+    def __init__(self, xml_path, random_object_pos=False, random_object_z_rot=False, simulation_steps=10, render_mode="human", render_fps=30):
         print("Initializing PickPlaceCustomEnv...")
         self.np_random = None
 
+        self.color_id = 0
         self.colors = ['red', 'green', 'blue']
         self.color_map = {
             'red': [1.0, 0.0, 0.0, 1.0],
@@ -27,6 +28,7 @@ class PickPlaceCustomEnv():
 
         ## Option Flags
         self.random_object_pos = random_object_pos
+        self.random_object_z_rot = random_object_z_rot
 
         ## Define action and observation space
         action_dim = self.model.nu # number of actuators/controls = dim(ctrl)
@@ -35,7 +37,6 @@ class PickPlaceCustomEnv():
         self.joint_limits = np.array([action_low, action_high]).T  # shape (nu, 2)
 
         ## Constants
-        self.hand_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "hand")
         self.grasp_site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "grasp_site")
         self.object_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "object")
         self.object_qpos_addr = self.model.jnt_qposadr[self.model.body_jntadr[self.object_body_id]]
@@ -63,6 +64,7 @@ class PickPlaceCustomEnv():
         ## Options
         if options is not None:
             self.random_object_pos = options.get("random_object_pos", self.random_object_pos)
+            self.random_object_z_rot = options.get("random_object_z_rot", self.random_object_z_rot)
 
         ## Reset MuJoCo model and data to home position
         mujoco.mj_resetData(self.model, self.data)
@@ -70,20 +72,31 @@ class PickPlaceCustomEnv():
         self.data.ctrl[:] = self.model.keyframe('home').ctrl
 
         ## Randomly select object color
-        object_color_name = self.np_random.choice(self.colors)
+        # object_color_name = self.np_random.choice(self.colors)
+        object_color_name = self.colors[self.color_id % len(self.colors)]
+        self.color_id += 1
         object_color = self.color_map[object_color_name]
         self.model.geom("object_geom").rgba = object_color
 
         ## Set object position
-        if self.random_object_pos: # Random object position
+        if self.random_object_pos:
             object_delta_x_pos = self.np_random.uniform(-0.15, 0.15)
             object_delta_y_pos = self.np_random.uniform(-0.15, 0.15)
-        else: # Fixed object position
+        else:
             object_delta_x_pos = 0.0
             object_delta_y_pos = 0.0
         new_object_pos = self.model.body("object").pos.copy()
         new_object_pos[:2] += (object_delta_x_pos, object_delta_y_pos)
         self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 3] = new_object_pos
+
+        ## Set object z-rotation
+        if self.random_object_z_rot:
+            object_z_rot = self.np_random.uniform(-np.pi, np.pi)
+        else:
+            object_z_rot = 0.0
+        object_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+        mujoco.mju_axisAngle2Quat(object_quat, np.array([0.0, 0.0, 1.0], dtype=np.float64), object_z_rot)
+        self.data.qpos[self.object_qpos_addr + 3 : self.object_qpos_addr + 7] = object_quat
 
         mujoco.mj_forward(self.model, self.data)
 
@@ -106,7 +119,10 @@ class PickPlaceCustomEnv():
 
     def step(self, action):
         ## Handle action
-        self.data.ctrl[:] = action
+        if action is None:
+            action = self.model.keyframe('home').ctrl
+        else:
+            self.data.ctrl[:] = action
         
         ## Step simulation
         mujoco.mj_step(self.model, self.data, self.simulation_steps) # 2ms each 
@@ -129,15 +145,18 @@ class PickPlaceCustomEnv():
     
     def _get_obs(self):
         """
-        "state": (16,) robot state information (9 joint angles, 3 grasp site position, 4 hand quaternion)
+        "state": (16,) robot state information (9 joint angles, 3 grasp site position, 4 grasp site quaternion)
         "object": (7,) object position (x,y,z) and quaternion (qx,qy,qz,qw)
         "goal": (3,) goal position (x,y,z)
         """
         ## Robot state information
         robot_joint_angles = self.data.qpos[:9].copy().astype(np.float32) # 9 joint angles (7 for the arm, 2 for the gripper)
         grasp_site_pos = self.data.site_xpos[self.grasp_site_id].copy().astype(np.float32) # 3 grasp site position
-        hand_quat = self.data.xquat[self.hand_id].copy().astype(np.float32) # 4 hand quaternion
-        state = np.concatenate([robot_joint_angles, grasp_site_pos, hand_quat]).astype(np.float32) # (9 + 3 + 4) = 16
+        grasp_site_mat = self.data.site_xmat[self.grasp_site_id].copy().astype(np.float64)  # 3x3 rotation matrix, flat (9,)
+        grasp_site_quat = np.zeros(4, dtype=np.float64)
+        mujoco.mju_mat2Quat(grasp_site_quat, grasp_site_mat)
+        grasp_site_quat = grasp_site_quat.astype(np.float32)
+        state = np.concatenate([robot_joint_angles, grasp_site_pos, grasp_site_quat]).astype(np.float32) # (9 + 3 + 4) = 16
 
         ## Object information
         object = self.data.qpos[self.object_qpos_addr : self.object_qpos_addr + 7].copy().astype(np.float32) # object position and quaternion
@@ -203,23 +222,28 @@ if __name__ == "__main__":
         start_time = time.time()
 
         print(f"Step: {step}")
-        action = np.random.uniform(-1.0, 1.0, size=env.model.nu)  # Random action
+        action = None
+        # action = np.random.uniform(-1.0, 1.0, size=env.model.nu)  # Random action
         obs, done, info = env.step(action)
         print(f"Joint Angles: {obs['state'][:9]}")
-        print(f"Hand Pose: {obs['state'][9:12]} | Hand Quat: {obs['state'][12:16]}")
+        print(f"Grasp Site Pose: {obs['state'][9:12]} | Grasp Site Quat: {obs['state'][12:16]}")
         print(f"Object Pose: {obs['object'][:3]} | Object Quat: {obs['object'][3:]}")
         print(f"Goal Position: {obs['goal']}")
         print("Info:", info)
         env.render()
-        if done:
-            print("Episode done!")
-            break
-        print(f"=="*20)
-        step += 1
 
         elapsed_time = time.time() - start_time
         print(f"Elapsed time for step: {elapsed_time * 1000:.4f} ms")
         if elapsed_time < env.simulation_step_time:
             time.sleep(env.simulation_step_time - elapsed_time)
 
+        print(f"=="*20)
+        step += 1
+
+        if done:
+            print("Episode done!")
+            time.sleep(2)
+            obs, info = env.reset()
+            step = 0
+        
     env.close()

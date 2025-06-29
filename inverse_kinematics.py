@@ -24,6 +24,7 @@ from absl import logging
 import mujoco
 import numpy as np
 import copy
+import time
 
 
 _INVALID_JOINT_NAMES_TYPE = (
@@ -45,10 +46,10 @@ def qpos_from_site_pose(mjmodel,
                         tol=1e-14,
                         rot_weight=1.0,
                         regularization_threshold=0.1,
-                        regularization_strength=3e-2,
+                        regularization_strength=1e-4,
                         max_update_norm=2.0,
                         progress_thresh=20.0,
-                        max_steps=100,
+                        max_steps=500,
                         inplace=False):
   """Find joint positions that satisfy a target site position and/or rotation.
 
@@ -127,6 +128,22 @@ def qpos_from_site_pose(mjmodel,
   if not inplace:
     # physics = physics.copy(share_model=True)
     mjdata = copy.deepcopy(mjdata)
+
+  # Smarter initial guess for `mjdata.qpos` based on where the target is relative to base frame.
+  # This is a heuristic that can help the solver converge faster.
+  # Assume the first joint is the base rotation (common in many arms).
+  if target_pos is not None:
+    mjdata.qpos = mjmodel.keyframe('home').qpos # Use home position as initial guess.
+    base_pos = np.zeros(3)
+    if hasattr(mjmodel, "body_pos") and mjmodel.nbody > 0:
+      base_pos = mjmodel.body_pos[0]
+    dx = target_pos[0] - base_pos[0]
+    dy = target_pos[1] - base_pos[1]
+    # Angle from base to target in x, y plane.
+    theta = np.arctan2(dy, dx)
+    # Set angle as initial guess for joint1 only (if at least one joint exists).
+    if mjmodel.nq > 0:
+      mjdata.qpos[0] = theta
 
   # Ensure that the Cartesian position of the site is up to date.
   mujoco.mj_fwdPosition(mjmodel, mjdata)
@@ -216,6 +233,18 @@ def qpos_from_site_pose(mjmodel,
       # Update `physics.qpos`, taking quaternions into account.
       mujoco.mj_integratePos(mjmodel, mjdata.qpos, update_nv, 1)
 
+      # Clamp joint positions to their limits
+      for i in range(mjmodel.njnt):
+          joint_type = mjmodel.jnt_type[i]
+          joint_addr = mjmodel.jnt_qposadr[i]
+          joint_dim = 1 if joint_type in [mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE] else 0  # Skip ball joints or fixed
+
+          if joint_dim:
+              qpos_idx = joint_addr
+              joint_min = mjmodel.jnt_range[i][0]
+              joint_max = mjmodel.jnt_range[i][1]
+              mjdata.qpos[qpos_idx] = np.clip(mjdata.qpos[qpos_idx], joint_min, joint_max)
+
       # Compute the new Cartesian position of the site.
       mujoco.mj_fwdPosition(mjmodel, mjdata)
 
@@ -223,8 +252,9 @@ def qpos_from_site_pose(mjmodel,
                     steps, err_norm, update_norm)
 
   if not success and steps == max_steps - 1:
-    # logging.warning('Failed to converge after %i steps: err_norm=%3g',
-    #                 steps, err_norm)
+    logging.warning('Failed to converge after %i steps: err_norm=%3g',
+                    steps, err_norm)
+    time.sleep(1)
     pass
 
   if not inplace:
